@@ -70,6 +70,7 @@ This extension supports a wide range of OData query functionalities, tailored sp
 - **`endswith`**
 - **`contains`**
 - **`substringof`**
+- **`not`**
 
 ## Supported Lambda Operators
 - **`any`**
