@@ -117,5 +117,137 @@ namespace Nest.OData.Tests
 
             Assert.True(JToken.DeepEquals(expectedJObject, actualJObject), "Expected and actual JSON do not match.");
         }
+
+        [Fact]
+        public void MultipleIdenticalFunctionCalls()
+        {
+            var queryOptions = "$filter=(contains(Category,'Goods')) or (contains(Category,'Goods')) or (contains(Category,'Goods'))".GetODataQueryOptions<Product>();
+
+            var elasticQuery = queryOptions.ToElasticQuery();
+
+            Assert.NotNull(elasticQuery);
+
+            var queryJson = elasticQuery.ToJson();
+
+            var expectedJson = @"
+            {
+              ""query"": {
+                ""wildcard"": {
+                  ""Category"": {
+                    ""value"": ""*goods*""
+                  }
+                }
+              }
+            }";
+
+            var actualJObject = JObject.Parse(queryJson);
+            var expectedJObject = JObject.Parse(expectedJson);
+
+            Assert.True(JToken.DeepEquals(expectedJObject, actualJObject), "Expected and actual JSON do not match.");
+        }
+
+        [Fact]
+        public void MultipleDifferentFunctionCalls()
+        {
+            var queryOptions = "$filter=(contains(Category,'Goods')) or (contains(Category,'Food')) or (contains(Name,'Merchandise'))".GetODataQueryOptions<Product>();
+
+            var elasticQuery = queryOptions.ToElasticQuery();
+
+            Assert.NotNull(elasticQuery);
+
+            var queryJson = elasticQuery.ToJson();
+
+            var expectedJson = @"
+            {
+              ""query"": {
+                ""bool"": {
+                  ""should"": [
+                    {
+                      ""wildcard"": {
+                        ""Category"": {
+                          ""value"": ""*goods*""
+                        }
+                      }
+                    },
+                    {
+                      ""wildcard"": {
+                        ""Category"": {
+                          ""value"": ""*food*""
+                        }
+                      }
+                    },
+                    {
+                      ""wildcard"": {
+                        ""Name"": {
+                          ""value"": ""*test*""
+                        }
+                      }
+                    }
+                  ],
+                  ""minimum_should_match"": 1
+                }
+              }
+            }";
+
+            var actualJObject = JObject.Parse(queryJson);
+            var expectedJObject = JObject.Parse(expectedJson);
+
+            Assert.True(JToken.DeepEquals(expectedJObject, actualJObject), "Expected and actual JSON do not match.");
+        }
+
+        [Fact]
+        public void MultipleOperatorsFunctionCall()
+        {
+            var queryOptions = "$filter=(contains(Category,'Food') and contains(Category,'Goods')) or contains(Name,'Merchandise')".GetODataQueryOptions<Product>();
+
+            var elasticQuery = queryOptions.ToElasticQuery();
+
+            Assert.NotNull(elasticQuery);
+
+            var queryJson = elasticQuery.ToJson();
+
+            var expectedJson = @"
+            {
+              ""query"": {
+                ""bool"": {
+                  ""should"": [
+                    {
+                      ""bool"": {
+                        ""must"": [
+                          {
+                            ""wildcard"": {
+                              ""Category"": {
+                                ""value"": ""*food*""
+                              }
+                            }
+                          },
+                          {
+                            ""wildcard"": {
+                              ""Category"": {
+                                ""value"": ""*fresh*""
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      ""wildcard"": {
+                        ""Name"": {
+                          ""value"": ""*test*""
+                        }
+                      }
+                    }
+                  ],
+                  ""minimum_should_match"": 1
+                }
+              }
+            }";
+
+            var actualJObject = JObject.Parse(queryJson);
+            var expectedJObject = JObject.Parse(expectedJson);
+
+            Assert.True(JToken.DeepEquals(expectedJObject, actualJObject), "Expected and actual JSON do not match.");
+        }
     }
 }

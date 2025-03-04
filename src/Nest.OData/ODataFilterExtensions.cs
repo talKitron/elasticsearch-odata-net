@@ -50,6 +50,11 @@ namespace Nest.OData
 
         internal static QueryContainer TranslateExpression(QueryNode node, ODataExpressionContext context = null)
         {
+            if (ShouldOptimizeOrOperation(node))
+            {
+                return OptimizeIdenticalFunctionCalls(node as BinaryOperatorNode, context);
+            }
+
             return node.Kind switch
             {
                 QueryNodeKind.Any => TranslateAnyNode(node as AnyNode, context),
@@ -62,6 +67,71 @@ namespace Nest.OData
                 QueryNodeKind.Constant => null,
                 _ => throw new NotImplementedException($"Unsupported node type: {node.Kind}"),
             };
+        }
+
+        private static bool ShouldOptimizeOrOperation(QueryNode node)
+        {
+            return node is BinaryOperatorNode binaryNode &&
+                   binaryNode.OperatorKind == BinaryOperatorKind.Or &&
+                   binaryNode.Left is SingleValueFunctionCallNode &&
+                   binaryNode.Right is SingleValueFunctionCallNode;
+        }
+
+        private static QueryContainer OptimizeIdenticalFunctionCalls(BinaryOperatorNode node, ODataExpressionContext context)
+        {
+            var leftFunc = node.Left as SingleValueFunctionCallNode;
+            var rightFunc = node.Right as SingleValueFunctionCallNode;
+
+            var functionCalls = new[]
+            {
+                (Node: leftFunc, IsNested: IsNestedFunctionCall(leftFunc)),
+                (Node: rightFunc, IsNested: IsNestedFunctionCall(rightFunc))
+            };
+
+            if (AreFunctionCallsIdentical(functionCalls[0], functionCalls[1]))
+            {
+                return TranslateExpression(node.Left, context);
+            }
+
+            return TranslateExpression(node.Right, context);
+        }
+
+        private static bool AreFunctionCallsIdentical((SingleValueFunctionCallNode Node, bool IsNested) first, (SingleValueFunctionCallNode Node, bool IsNested) other)
+        {
+            if (HasIdenticalFunctionSignature(first.Node, other.Node) == false)
+            {
+                return false;
+            }
+
+            if (HasIdenticalParameters(first.Node, other.Node) == false)
+            {
+                return false;
+            }
+
+            if (first.IsNested != other.IsNested)
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool HasIdenticalFunctionSignature(SingleValueFunctionCallNode first, SingleValueFunctionCallNode other)
+        {
+            return string.Equals(first.Name, other.Name, StringComparison.OrdinalIgnoreCase) && first.Parameters.Count() == other.Parameters.Count();
+        }
+
+        private static bool HasIdenticalParameters(SingleValueFunctionCallNode first, SingleValueFunctionCallNode other)
+        {
+            if (first.Parameters.First().ToString() != other.Parameters.First().ToString())
+            {
+                return false;
+            }
+
+            var firstValue = ExtractValue(first.Parameters.Last())?.ToString();
+            var otherValue = ExtractValue(other.Parameters.Last())?.ToString();
+
+            return string.Equals(firstValue, otherValue);
         }
 
         private static QueryContainer TranslateAnyNode(AnyNode node, ODataExpressionContext context = null)
@@ -212,6 +282,7 @@ namespace Nest.OData
         private static QueryContainer TranslateOrOperations(BinaryOperatorNode node, ODataExpressionContext context = null)
         {
             var queries = new List<QueryContainer>();
+            var functionCalls = new List<(SingleValueFunctionCallNode Node, bool IsNested)>();
 
             void Collect(QueryNode queryNode)
             {
@@ -222,13 +293,56 @@ namespace Nest.OData
                 }
                 else
                 {
-                    queries.Add(TranslateExpression(queryNode, context));
+                    if (queryNode is SingleValueFunctionCallNode funcNode)
+                    {
+                        var isNested = IsNestedFunctionCall(funcNode);
+                        functionCalls.Add((funcNode, isNested));
+                    }
+
+                    var query = TranslateExpression(queryNode, context);
+                    if (query != null)
+                    {
+                        queries.Add(query);
+                    }
                 }
             }
 
             Collect(node);
 
-            return new BoolQuery { Should = queries, MinimumShouldMatch = 1 };
+            if (queries.Any() == false)
+            {
+                return null;
+            }
+
+            return OptimizeOrQueries(queries, functionCalls);
+        }
+
+        private static bool IsNestedFunctionCall(SingleValueFunctionCallNode funcNode)
+        {
+            return funcNode.Parameters.First() is SingleValuePropertyAccessNode propNode && ODataHelpers.IsNavigationNode(propNode.Source.Kind);
+        }
+
+        private static QueryContainer OptimizeOrQueries(List<QueryContainer> queries, List<(SingleValueFunctionCallNode Node, bool IsNested)> functionCalls)
+        {
+            if (CanOptimizeFunctionCalls(functionCalls, queries.Count) == false)
+            {
+                return new BoolQuery { Should = queries, MinimumShouldMatch = 1 };
+            }
+
+            var first = functionCalls[0];
+
+            return AreAllFunctionCallsIdentical(functionCalls, first) ? queries[0] : new BoolQuery { Should = queries, MinimumShouldMatch = 1 };
+        }
+
+        private static bool CanOptimizeFunctionCalls(List<(SingleValueFunctionCallNode Node, bool IsNested)> functionCalls, int queryCount)
+        {
+            return functionCalls.Count > 0 && functionCalls.Count == queryCount;
+        }
+
+        private static bool AreAllFunctionCallsIdentical(List<(SingleValueFunctionCallNode Node, bool IsNested)> functionCalls,
+                                                       (SingleValueFunctionCallNode Node, bool IsNested) first)
+        {
+            return functionCalls.All(f => AreFunctionCallsIdentical(first, f));
         }
 
         private static QueryContainer TranslateAndOperations(BinaryOperatorNode node, ODataExpressionContext context = null)
@@ -249,6 +363,17 @@ namespace Nest.OData
             }
 
             Collect(node);
+
+            if (queries.Any() == false)
+            {
+                return null;
+            }
+
+            // If we have a single query from an AND operation to maintain the expected structure.
+            if (queries.Count == 1)
+            {
+                return new BoolQuery { Must = queries };
+            }
 
             return new BoolQuery { Must = queries };
         }
@@ -319,7 +444,7 @@ namespace Nest.OData
             {
                 if (constantNode.Value is DateTime dateTime)
                 {
-                    return dateTime.ToString("o"); 
+                    return dateTime.ToString("o");
                 }
                 else if (constantNode.Value is DateTimeOffset dateTimeOffset)
                 {
