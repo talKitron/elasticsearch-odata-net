@@ -391,5 +391,39 @@ namespace Nest.OData.Tests
 
             Assert.True(JToken.DeepEquals(expectedJObject, actualJObject), "Expected and actual JSON do not match.");
         }
+
+        [Fact]
+        public void NotOperator()
+        {
+            var queryOptions = "$filter=not contains(Category, 'Goods')".GetODataQueryOptions<Product>();
+
+            var elasticQuery = queryOptions.ToElasticQuery();
+
+            Assert.NotNull(elasticQuery);
+
+            var queryJson = elasticQuery.ToJson();
+
+            var expectedJson = @"
+            {
+              ""query"": {
+                ""bool"": {
+                  ""must_not"": [
+                    {
+                      ""wildcard"": {
+                        ""Category"": {
+                          ""value"": ""*goods*""
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }";
+
+            var actualJObject = JObject.Parse(queryJson);
+            var expectedJObject = JObject.Parse(expectedJson);
+
+            Assert.True(JToken.DeepEquals(expectedJObject, actualJObject), "Expected and actual JSON do not match.");
+        }
     }
 }

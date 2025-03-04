@@ -63,6 +63,7 @@ namespace Nest.OData
                 QueryNodeKind.BinaryOperator => TranslateOperatorNode(node as BinaryOperatorNode, context),
                 QueryNodeKind.SingleValueFunctionCall => TranslateFunctionCallNode(node as SingleValueFunctionCallNode, context),
                 QueryNodeKind.Convert => TranslateExpression(((ConvertNode)node).Source, context),
+                QueryNodeKind.UnaryOperator => TranslateUnaryOperatorNode(node as UnaryOperatorNode, context),
                 QueryNodeKind.SingleValuePropertyAccess => null,
                 QueryNodeKind.Constant => null,
                 _ => throw new NotImplementedException($"Unsupported node type: {node.Kind}"),
@@ -461,6 +462,27 @@ namespace Nest.OData
             }
 
             throw new NotImplementedException("Complex values are not supported yet.");
+        }
+
+
+        private static QueryContainer TranslateUnaryOperatorNode(UnaryOperatorNode node, ODataExpressionContext context)
+        {
+            if (node.OperatorKind != UnaryOperatorKind.Not)
+            {
+                throw new NotImplementedException($"Unsupported unary operator: {node.OperatorKind}");
+            }
+
+            var operandQuery = TranslateExpression(node.Operand, context);
+
+            if (operandQuery == null)
+            {
+                return null;
+            }
+
+            return new BoolQuery
+            {
+                MustNot = new[] { operandQuery }
+            };
         }
     }
 }

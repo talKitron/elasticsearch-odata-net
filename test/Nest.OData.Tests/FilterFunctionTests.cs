@@ -161,6 +161,7 @@ namespace Nest.OData.Tests
             {
               ""query"": {
                 ""bool"": {
+                  ""minimum_should_match"": 1,
                   ""should"": [
                     {
                       ""wildcard"": {
@@ -179,12 +180,11 @@ namespace Nest.OData.Tests
                     {
                       ""wildcard"": {
                         ""Name"": {
-                          ""value"": ""*test*""
+                          ""value"": ""*merchandise*""
                         }
                       }
                     }
-                  ],
-                  ""minimum_should_match"": 1
+                  ]
                 }
               }
             }";
@@ -210,6 +210,7 @@ namespace Nest.OData.Tests
             {
               ""query"": {
                 ""bool"": {
+                  ""minimum_should_match"": 1,
                   ""should"": [
                     {
                       ""bool"": {
@@ -224,7 +225,7 @@ namespace Nest.OData.Tests
                           {
                             ""wildcard"": {
                               ""Category"": {
-                                ""value"": ""*fresh*""
+                                ""value"": ""*goods*""
                               }
                             }
                           }
@@ -234,12 +235,45 @@ namespace Nest.OData.Tests
                     {
                       ""wildcard"": {
                         ""Name"": {
-                          ""value"": ""*test*""
+                          ""value"": ""*merchandise*""
                         }
                       }
                     }
                   ],
-                  ""minimum_should_match"": 1
+                }
+              }
+            }";
+
+            var actualJObject = JObject.Parse(queryJson);
+            var expectedJObject = JObject.Parse(expectedJson);
+
+            Assert.True(JToken.DeepEquals(expectedJObject, actualJObject), "Expected and actual JSON do not match.");
+        }
+
+        [Fact]
+        public void NotFunction()
+        {
+            var queryOptions = "$filter=not(Category eq 'Goods')".GetODataQueryOptions<Product>();
+
+            var elasticQuery = queryOptions.ToElasticQuery();
+
+            Assert.NotNull(elasticQuery);
+
+            var queryJson = elasticQuery.ToJson();
+
+            var expectedJson = @"
+            {
+              ""query"": {
+                ""bool"": {
+                  ""must_not"": [
+                    {
+                      ""term"": {
+                        ""Category"": {
+                          ""value"": ""goods""
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }";
